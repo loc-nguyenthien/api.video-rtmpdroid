@@ -38,7 +38,9 @@ class Rtmp(private val enableWrite: Boolean = true) : Closeable {
         /**
          * @return [Boolean.true] if connection is still on. Otherwise [Boolean.false].
          */
-        get() = nativeIsConnected()
+        get() = synchronized(this) {
+            if (ptr == 0L) false else nativeIsConnected()
+        }
 
     private external fun nativeGetTimeout(): Int
     private external fun nativeSetTimeout(timeoutInMs: Int): Int
@@ -50,19 +52,23 @@ class Rtmp(private val enableWrite: Boolean = true) : Closeable {
         /**
          * @return connection timeout is ms
          */
-        get() {
+        get() = synchronized(this) {
+            require(ptr != 0L) { "Rtmp instance has been closed" }
             val timeout = nativeGetTimeout()
             if (timeout < 0) {
                 throw UnsupportedOperationException("Can't get timeout")
             }
-            return timeout
+            timeout
         }
         /**
          * @param value connection timeout is ms
          */
         set(value) {
-            if (nativeSetTimeout(value) != 0) {
-                throw UnsupportedOperationException("Can't set timeout")
+            synchronized(this) {
+                require(ptr != 0L) { "Rtmp instance has been closed" }
+                if (nativeSetTimeout(value) != 0) {
+                    throw UnsupportedOperationException("Can't set timeout")
+                }
             }
         }
 
@@ -80,14 +86,15 @@ class Rtmp(private val enableWrite: Boolean = true) : Closeable {
      * `videoCodecs` for standard codecs or in the `fourCCList` for enhanced codecs.
      */
     var supportedVideoCodecs: List<String>
-        get() {
+        get() = synchronized(this) {
+            require(ptr != 0L) { "Rtmp instance has been closed" }
             val videoCodecs = nativeGetVideoCodecs()
             if (videoCodecs <= 0) {
                 throw UnsupportedOperationException("Can't get supported video codecs")
             }
             val supportedCodecs = VideoCodecs(videoCodecs)
             val supportedExCodecs = ExVideoCodecs(nativeGetExVideoCodecs())
-            return supportedCodecs.supportedCodecs + supportedExCodecs.supportedCodecs
+            supportedCodecs.supportedCodecs + supportedExCodecs.supportedCodecs
         }
         set(value) {
             if (value.isEmpty()) {
@@ -106,12 +113,15 @@ class Rtmp(private val enableWrite: Boolean = true) : Closeable {
                 }
             }
 
-            if (nativeSetVideoCodec(VideoCodecs.fromMimeTypes(supportedCodecs).value) != 0) {
-                throw UnsupportedOperationException("Can't set supported video codecs")
-            }
+            synchronized(this) {
+                require(ptr != 0L) { "Rtmp instance has been closed" }
+                if (nativeSetVideoCodec(VideoCodecs.fromMimeTypes(supportedCodecs).value) != 0) {
+                    throw UnsupportedOperationException("Can't set supported video codecs")
+                }
 
-            if (nativeSetExVideoCodec(ExVideoCodecs.fromMimeTypes(supportedExCodecs).value) != 0) {
-                throw UnsupportedOperationException("Can't set supported extended video codecs")
+                if (nativeSetExVideoCodec(ExVideoCodecs.fromMimeTypes(supportedExCodecs).value) != 0) {
+                    throw UnsupportedOperationException("Can't set supported extended video codecs")
+                }
             }
         }
 
@@ -130,18 +140,21 @@ class Rtmp(private val enableWrite: Boolean = true) : Closeable {
      * @param url valid RTMP url (rtmp://myserver/s/streamKey)
      */
     fun connect(url: String) {
-        if (nativeSetupURL(url) != 0) {
-            throw IllegalArgumentException("Invalid RTMP URL: $url")
-        }
-
-        if (enableWrite) {
-            if (nativeEnableWrite() != 0) {
-                throw UnsupportedOperationException("Failed to enable write")
+        synchronized(this) {
+            require(ptr != 0L) { "Rtmp instance has been closed" }
+            if (nativeSetupURL(url) != 0) {
+                throw IllegalArgumentException("Invalid RTMP URL: $url")
             }
-        }
 
-        if (nativeConnect() != 0) {
-            throw ConnectException("Failed to connect")
+            if (enableWrite) {
+                if (nativeEnableWrite() != 0) {
+                    throw UnsupportedOperationException("Failed to enable write")
+                }
+            }
+
+            if (nativeConnect() != 0) {
+                throw ConnectException("Failed to connect")
+            }
         }
     }
 
@@ -153,8 +166,11 @@ class Rtmp(private val enableWrite: Boolean = true) : Closeable {
      * @see [deleteStream]
      */
     fun connectStream() {
-        if (nativeConnectStream() != 0) {
-            throw ConnectException("Failed to connectStream")
+        synchronized(this) {
+            require(ptr != 0L) { "Rtmp instance has been closed" }
+            if (nativeConnectStream() != 0) {
+                throw ConnectException("Failed to connectStream")
+            }
         }
     }
 
@@ -166,8 +182,11 @@ class Rtmp(private val enableWrite: Boolean = true) : Closeable {
      * @see [connectStream]
      */
     fun deleteStream() {
-        if (nativeDeleteStream() != 0) {
-            throw UnsupportedOperationException("Failed to delete stream")
+        synchronized(this) {
+            require(ptr != 0L) { "Rtmp instance has been closed" }
+            if (nativeDeleteStream() != 0) {
+                throw UnsupportedOperationException("Failed to delete stream")
+            }
         }
     }
 
@@ -183,6 +202,7 @@ class Rtmp(private val enableWrite: Boolean = true) : Closeable {
         require(buffer.isDirect) { "ByteBuffer must be a direct buffer" }
 
         val byteSent = synchronized(this) {
+            if (ptr == 0L) return -1
             nativeWrite(buffer, buffer.position(), buffer.remaining())
         }
         when {
@@ -210,6 +230,7 @@ class Rtmp(private val enableWrite: Boolean = true) : Closeable {
      */
     fun write(array: ByteArray, offset: Int = 0, size: Int = array.size): Int {
         val byteSent = synchronized(this) {
+            if (ptr == 0L) return -1
             nativeWrite(array, offset, size)
         }
         when {
@@ -234,7 +255,10 @@ class Rtmp(private val enableWrite: Boolean = true) : Closeable {
      * @return number of bytes received
      */
     fun read(array: ByteArray, offset: Int = 0, size: Int = array.size): Int {
-        val byteReceived = nativeRead(array, offset, size)
+        val byteReceived = synchronized(this) {
+            require(ptr != 0L) { "Rtmp instance has been closed" }
+            nativeRead(array, offset, size)
+        }
         when {
             byteReceived < 0 -> {
                 throw SocketException("Connection error")
@@ -257,8 +281,11 @@ class Rtmp(private val enableWrite: Boolean = true) : Closeable {
      * @see [readPacket]
      */
     fun writePacket(packet: RtmpPacket) {
-        if (nativeWritePacket(packet) != 0) {
-            throw SocketException("Failed to write packet")
+        synchronized(this) {
+            require(ptr != 0L) { "Rtmp instance has been closed" }
+            if (nativeWritePacket(packet) != 0) {
+                throw SocketException("Failed to write packet")
+            }
         }
     }
 
@@ -271,11 +298,14 @@ class Rtmp(private val enableWrite: Boolean = true) : Closeable {
      * @see [writePacket]
      */
     fun readPacket(): RtmpPacket {
-        val rtmpPacket = nativeReadPacket()
-        if (rtmpPacket == null) {
-            throw SocketException("Failed to read packet")
-        } else {
-            return rtmpPacket
+        synchronized(this) {
+            require(ptr != 0L) { "Rtmp instance has been closed" }
+            val rtmpPacket = nativeReadPacket()
+            if (rtmpPacket == null) {
+                throw SocketException("Failed to read packet")
+            } else {
+                return rtmpPacket
+            }
         }
     }
 
@@ -287,8 +317,11 @@ class Rtmp(private val enableWrite: Boolean = true) : Closeable {
      * @see [resume]
      */
     fun pause() {
-        if (nativePause() != 0) {
-            throw SocketException("Can't pause")
+        synchronized(this) {
+            require(ptr != 0L) { "Rtmp instance has been closed" }
+            if (nativePause() != 0) {
+                throw SocketException("Can't pause")
+            }
         }
     }
 
@@ -300,8 +333,11 @@ class Rtmp(private val enableWrite: Boolean = true) : Closeable {
      * @see [pause]
      */
     fun resume() {
-        if (nativeResume() != 0) {
-            throw SocketException("Can't resume")
+        synchronized(this) {
+            require(ptr != 0L) { "Rtmp instance has been closed" }
+            if (nativeResume() != 0) {
+                throw SocketException("Can't resume")
+            }
         }
     }
 
@@ -311,9 +347,11 @@ class Rtmp(private val enableWrite: Boolean = true) : Closeable {
      * Closes the RTMP connection.
      */
     override fun close() {
-        if (ptr != 0L) {
-            nativeClose()
-            ptr = 0L
+        synchronized(this) {
+            if (ptr != 0L) {
+                ptr = 0L
+                nativeClose()
+            }
         }
     }
 
@@ -327,8 +365,11 @@ class Rtmp(private val enableWrite: Boolean = true) : Closeable {
      * @param fd file descriptor of a UNIX socket.
      */
     fun serve(fd: Int) {
-        if (nativeServe(fd) != 0) {
-            throw SocketException("Can't serve")
+        synchronized(this) {
+            require(ptr != 0L) { "Rtmp instance has been closed" }
+            if (nativeServe(fd) != 0) {
+                throw SocketException("Can't serve")
+            }
         }
     }
 }

@@ -26,6 +26,7 @@ nativeAlloc(JNIEnv *env, jobject thiz) {
         return 0;
     }
     rtmp_context->rtmp = rtmp;
+    pthread_mutex_init(&rtmp_context->mutex, nullptr);
     return reinterpret_cast<jlong>(rtmp_context);
 }
 
@@ -221,12 +222,17 @@ nativeWrite(JNIEnv *env, jobject thiz, jbyteArray data, jint offset, jint size) 
         return -EFAULT;
     }
 
+    pthread_mutex_lock(&rtmp_context->mutex);
+    if (rtmp_context->rtmp == nullptr) {
+        pthread_mutex_unlock(&rtmp_context->mutex);
+        return -EFAULT;
+    }
+
     char *buf = (char *) env->GetByteArrayElements(data, nullptr);
-
     int res = RTMP_Write(rtmp_context->rtmp, &buf[offset], size);
-
     env->ReleaseByteArrayElements(data, (jbyte *) buf, 0);
 
+    pthread_mutex_unlock(&rtmp_context->mutex);
     return res;
 }
 
@@ -237,10 +243,16 @@ nativeWriteA(JNIEnv *env, jobject thiz, jobject buffer, jint offset, jint size) 
         return -EFAULT;
     }
 
-    char *buf = (char *) env->GetDirectBufferAddress(buffer);
+    pthread_mutex_lock(&rtmp_context->mutex);
+    if (rtmp_context->rtmp == nullptr) {
+        pthread_mutex_unlock(&rtmp_context->mutex);
+        return -EFAULT;
+    }
 
+    char *buf = (char *) env->GetDirectBufferAddress(buffer);
     int res = RTMP_Write(rtmp_context->rtmp, &buf[offset], size);
 
+    pthread_mutex_unlock(&rtmp_context->mutex);
     return res;
 }
 
@@ -303,15 +315,24 @@ nativeReadPacket(JNIEnv *env, jobject thiz) {
 
 JNIEXPORT void JNICALL
 nativeClose(JNIEnv *env, jobject thiz) {
-    rtmp_context *rtmp_context = RtmpWrapper::getNative(env, thiz);
+    jclass clazz = env->GetObjectClass(thiz);
+    jfieldID ptrField = env->GetFieldID(clazz, "ptr", "J");
+    rtmp_context *rtmp_context = nullptr;
+    if (ptrField) {
+        rtmp_context = reinterpret_cast<struct rtmp_context *>(env->GetLongField(thiz, ptrField));
+        env->SetLongField(thiz, ptrField, 0L);
+    }
+    env->DeleteLocalRef(clazz);
 
     if (rtmp_context != nullptr) {
+        pthread_mutex_lock(&rtmp_context->mutex);
         if (rtmp_context->rtmp != nullptr) {
             RTMP_Close(rtmp_context->rtmp);
             RTMP_Free(rtmp_context->rtmp);
             rtmp_context->rtmp = nullptr;
         }
-
+        pthread_mutex_unlock(&rtmp_context->mutex);
+        pthread_mutex_destroy(&rtmp_context->mutex);
         free(rtmp_context);
     }
 }
