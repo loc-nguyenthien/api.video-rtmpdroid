@@ -1,8 +1,19 @@
 // Top-level build file where you can add configuration options common to all sub-projects/modules.
 buildscript {
     ext {
-        kotlinVersion = '1.8.22'
-        dokkaVersion = '1.8.20'
+        // existing versions
+        kotlinVersion   = '1.8.22'
+        dokkaVersion    = '1.8.20'
+
+        // ★ centralize Android + NDK versions used by all modules ★
+        compileSdkVersion = 35
+        targetSdkVersion  = 35
+        minSdkVersion     = 21
+
+        // Use a modern NDK that supports 16 KB page size well
+        // (this is the one that ships with recent Android Studio releases;
+        // adjust if your local install differs)
+        ndkVersion        = '26.1.10909125'
     }
 
     dependencies {
@@ -16,8 +27,40 @@ buildscript {
 
 plugins {
     id 'com.android.application' version '8.2.0' apply false
-    id 'com.android.library' version '8.2.0' apply false
+    id 'com.android.library'     version '8.2.0' apply false
     id 'org.jetbrains.kotlin.android' version "${kotlinVersion}" apply false
+}
+
+// ★ Enforce consistent Android config + NDK across subprojects ★
+subprojects { subproj ->
+    plugins.withId("com.android.library") {
+        subproj.android {
+            compileSdkVersion rootProject.ext.compileSdkVersion
+
+            defaultConfig {
+                minSdkVersion rootProject.ext.minSdkVersion
+                targetSdkVersion rootProject.ext.targetSdkVersion
+            }
+
+            // Make sure the library that builds librtmpdroid.so
+            // uses this NDK (needed for the 16 KB page-size flags
+            // you’ll add in CMake / Android.mk)
+            ndkVersion rootProject.ext.ndkVersion
+        }
+    }
+
+    plugins.withId("com.android.application") {
+        subproj.android {
+            compileSdkVersion rootProject.ext.compileSdkVersion
+
+            defaultConfig {
+                minSdkVersion rootProject.ext.minSdkVersion
+                targetSdkVersion rootProject.ext.targetSdkVersion
+            }
+
+            ndkVersion rootProject.ext.ndkVersion
+        }
+    }
 }
 
 tasks.register('clean', Delete) {

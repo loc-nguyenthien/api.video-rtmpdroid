@@ -4,6 +4,7 @@ plugins {
     id 'org.jetbrains.dokka'
 }
 apply from: 'maven-push.gradle'
+apply plugin: "maven-publish"
 
 android {
     namespace 'video.api.rtmpdroid'
@@ -12,8 +13,8 @@ android {
 
     defaultConfig {
         minSdk 21
-        compileSdk 34
-        targetSdk 34
+        compileSdk 35
+        targetSdk 35
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles "consumer-rules.pro"
@@ -48,6 +49,13 @@ android {
                 arguments '-DPACKAGING=UNPACKED'
             }
             versionName VERSION_NAME
+        }
+    }
+
+    // ★ make sure JNI packaging is modern (no legacy .so handling)
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging = false
         }
     }
 
